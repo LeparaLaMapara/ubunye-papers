@@ -1,45 +1,46 @@
-// Ubunye Papers — home screen.
-// Browse catalogue, search/filter, and save papers for offline use (per paper).
+// Ubunye Papers — home screen. Real Grade-12 catalogue from the Multiversity vault.
 
 const SAVED_KEY = 'ubunye.saved';
 const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 
 let saved = new Set(JSON.parse(localStorage.getItem(SAVED_KEY) || '[]'));
+let ENTRIES = [];
+let CFG = null;
 let activeSubject = 'All';
 let query = '';
 
 function persistSaved() { localStorage.setItem(SAVED_KEY, JSON.stringify([...saved])); }
 
 function subjects() {
-  return ['All', ...Array.from(new Set(CATALOGUE.map(p => p.subject)))];
+  const names = Array.from(new Set(ENTRIES.map(e => e.subjectName))).sort();
+  return ['All', ...names];
 }
 
-function matches(p) {
-  const bySubject = activeSubject === 'All' || p.subject === activeSubject;
-  const hay = `${p.subject} ${p.paper} ${p.year} ${p.tag}`.toLowerCase();
-  const byQuery = !query || hay.includes(query.toLowerCase());
-  return bySubject && byQuery;
+function matches(e) {
+  const bySubject = activeSubject === 'All' || e.subjectName === activeSubject;
+  const hay = `${e.subjectName} ${e.year} paper ${e.paperNo}`.toLowerCase();
+  return bySubject && (!query || hay.includes(query.toLowerCase()));
 }
 
 function renderChips() {
   document.getElementById('chips').innerHTML = subjects().map(s =>
-    `<button class="chip ${s === activeSubject ? 'active' : ''}" data-subject="${s}">${s}</button>`
+    `<button class="chip ${s === activeSubject ? 'active' : ''}" data-subject="${s.replace(/"/g, '&quot;')}">${s}</button>`
   ).join('');
 }
 
-function card(p) {
-  const isSaved = saved.has(p.id);
-  const memoPill = p.hasMemo ? '<span class="pill memo">Memo</span>' : '';
+function card(e) {
+  const isSaved = saved.has(e.id);
+  const memoPill = e.hasMemo ? '<span class="pill memo">Memo</span>' : '';
   const btn = isSaved
-    ? `<button class="save saved" data-id="${p.id}">${CHECK} Saved</button>`
-    : `<button class="save" data-id="${p.id}">Save</button>`;
+    ? `<button class="save saved" data-id="${e.id}">${CHECK} Saved</button>`
+    : `<button class="save" data-id="${e.id}">Save</button>`;
   return `
     <div class="card">
-      <a class="thumb" href="paper.html?id=${p.id}">${p.tag}</a>
+      <a class="thumb" href="paper.html?id=${e.id}">${e.tag}</a>
       <div class="meta">
-        <a class="title" href="paper.html?id=${p.id}"><h3>${p.subject}</h3></a>
-        <div class="sub">${p.paper} &middot; ${p.year} &middot; ${p.sizeKB} KB</div>
-        <div class="tags"><span class="pill">${p.duration}</span>${memoPill}</div>
+        <a class="title" href="paper.html?id=${e.id}"><h3>${e.subjectName}</h3></a>
+        <div class="sub">Paper ${e.paperNo} &middot; ${e.year}</div>
+        <div class="tags"><span class="pill">Grade 12</span>${memoPill}</div>
       </div>
       ${btn}
     </div>`;
@@ -47,13 +48,15 @@ function card(p) {
 
 function renderList() {
   const list = document.getElementById('list');
-  const items = CATALOGUE.filter(matches);
+  const items = ENTRIES.filter(matches);
   if (!items.length) { list.innerHTML = '<p class="empty">No papers match your search.</p>'; return; }
-  const years = Array.from(new Set(items.map(p => p.year))).sort((a, b) => b - a);
-  list.innerHTML = years.map(y =>
-    `<div class="group-title">${y} National Senior Certificate</div>` +
-    items.filter(p => p.year === y).map(card).join('')
-  ).join('');
+  // Group by subject (A–Z); within a subject, newest year first.
+  const bySubject = {};
+  items.forEach(e => { (bySubject[e.subjectName] ||= []).push(e); });
+  list.innerHTML = Object.keys(bySubject).sort().map(sub => {
+    const rows = bySubject[sub].sort((a, b) => b.year - a.year || a.paperNo - b.paperNo);
+    return `<div class="group-title">${sub}</div>` + rows.map(card).join('');
+  }).join('');
 }
 
 async function renderStorage() {
@@ -66,35 +69,33 @@ async function renderStorage() {
   }
   el.innerHTML = count
     ? `${count} paper${count > 1 ? 's' : ''} saved for offline${usage}`
-    : 'Nothing saved yet &mdash; tap Save on a paper.';
+    : 'Nothing saved yet &mdash; open a paper and tap Save.';
 }
 
-function setStatus() {
+function setStatus(extra) {
   const el = document.getElementById('status');
   const txt = document.getElementById('statusText');
   if (navigator.onLine) {
     el.classList.remove('off');
-    txt.innerHTML = '<b>Online</b> &middot; save papers now so they work later';
+    txt.innerHTML = extra || '<b>Online</b> &middot; ' + ENTRIES.length + ' Grade-12 papers from the vault';
   } else {
     el.classList.add('off');
-    txt.innerHTML = '<b>Offline</b> &middot; saved papers still open &middot; 0 MB used';
+    txt.innerHTML = '<b>Offline</b> &middot; saved papers still open &middot; browsing uses no data';
   }
 }
 
-// Save a paper: cache its viewer URL so it opens with no network.
-async function savePaper(id) {
-  const url = `paper.html?id=${id}`;
+// Save = download the PDF(s) now so they open with no data later.
+async function savePaper(id, btn) {
+  const e = ENTRIES.find(x => x.id === id);
+  if (!e) return;
+  const urls = [e.paperUrl, e.memoUrl].filter(Boolean);
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
   try {
-    if ('caches' in window) {
-      const cache = await caches.open('ubunye-papers-v2');
-      await cache.add(url);
-    }
-  } catch (e) { /* still mark saved; shell already covers the viewer */ }
-  saved.add(id); persistSaved();
-}
-
-async function removePaper(id) {
-  saved.delete(id); persistSaved();
+    const cache = await caches.open('ubunye-pdfs');
+    await Promise.all(urls.map(u => cache.add(u).catch(() => {})));
+    saved.add(id); persistSaved();
+  } catch (e) { /* leave unsaved on failure */ }
+  if (btn) btn.disabled = false;
 }
 
 document.addEventListener('click', async e => {
@@ -103,27 +104,22 @@ document.addEventListener('click', async e => {
   const btn = e.target.closest('.save');
   if (btn) {
     const id = btn.dataset.id;
-    if (saved.has(id)) await removePaper(id); else await savePaper(id);
+    if (saved.has(id)) { saved.delete(id); persistSaved(); }
+    else await savePaper(id, btn);
     renderList(); renderStorage();
   }
 });
 
-document.getElementById('search').addEventListener('input', e => {
-  query = e.target.value; renderList();
-});
+document.getElementById('search').addEventListener('input', e => { query = e.target.value; renderList(); });
+window.addEventListener('online', () => setStatus());
+window.addEventListener('offline', () => setStatus());
 
-window.addEventListener('online', setStatus);
-window.addEventListener('offline', setStatus);
-
-// Service worker
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
-}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 
 // PWA install prompt
 let deferredPrompt = null;
-window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault(); deferredPrompt = e;
+window.addEventListener('beforeinstallprompt', ev => {
+  ev.preventDefault(); deferredPrompt = ev;
   document.getElementById('install').style.display = 'flex';
 });
 document.getElementById('installBtn').addEventListener('click', async () => {
@@ -132,7 +128,13 @@ document.getElementById('installBtn').addEventListener('click', async () => {
   deferredPrompt = null; document.getElementById('install').style.display = 'none';
 });
 
-renderChips();
-renderList();
-renderStorage();
-setStatus();
+(async function init() {
+  try {
+    const { cfg, entries } = await loadCatalogue();
+    CFG = cfg; ENTRIES = entries;
+    renderChips(); renderList(); renderStorage(); setStatus();
+  } catch (err) {
+    document.getElementById('list').innerHTML =
+      '<p class="empty">Could not load the catalogue. Connect once and reopen.</p>';
+  }
+})();

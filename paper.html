@@ -12,11 +12,16 @@
 <div class="bar">
   <a href="index.html" aria-label="Back">&larr;</a>
   <b id="barTitle">Paper</b>
-  <a class="toggle" id="toggle" href="#">Memo</a>
+  <button id="saveBtn" class="toggle">Save</button>
 </div>
-<div class="sheet" id="sheet"></div>
+<div class="viewer">
+  <div class="vtabs" id="tabs"></div>
+  <div id="msg" class="vmsg">Loading&hellip;</div>
+  <iframe id="frame" title="Past paper PDF"></iframe>
+  <a id="openBtn" class="open" target="_blank" rel="noopener" style="display:none">Open full screen</a>
+</div>
 
-<script src="catalogue.js"></script>
+<script src="lib.js"></script>
 <script src="viewer.js"></script>
 </body>
 </html>
